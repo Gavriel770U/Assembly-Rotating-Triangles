@@ -3,6 +3,9 @@ MODEL SMALL
 STACK 100h 
 DATASEG 
 
+; --------------------------   general data    --------------------------
+
+
 	direction dw ? ; 1 - up, 2 - right, 3 - down, 4 - left 
 	pointx	  dw ?
 	pointy	  dw ?
@@ -21,9 +24,23 @@ DATASEG
 	;                              invslope1   insvlope2
 	drawFilledVariables     dw 	    	0, 		      0  
 	
-	currentColor db 10 ; the current color that is selected
+	currentColor db 42 ; the current color that is selected
 
-	; saved triangles data
+; ----------------------------------------------------------------
+
+; --------------------   points input data    --------------------
+	
+	isTPressed dw 0     ; Triangle input press flag 
+
+	pointsInputedAmount dw 0 ; current amount of inputed points
+  
+	pointsXCoordinatesInputedBuffer dw 3 dup(0)
+	
+	pointsYCoordinatesInputedBuffer dw 3 dup (0)
+
+; ----------------------------------------------------------------
+
+; -------------------   saved triangles data    -------------------
 
 	trianglesAmount dw 2
 	
@@ -40,6 +57,9 @@ DATASEG
 	db 11 dup (0)
 	
 	trianglesClearColors db 11 dup (0)
+
+; ----------------------------------------------------------------
+
 ;---------------------------------------------------------------------------------------------------------------------------------
 ;----------------------------- SINES 'TABLE' FROM 0° TO 360° MULTIPLIED BY 102 ---------------------------------------------------
 ;---------------------------------------------------------------------------------------------------------------------------------
@@ -435,6 +455,8 @@ LEFT_DIRECTION	equ		4
 
 VALUES_SEPARATOR equ 999
 
+CLOCK equ es:6Ch
+
 ; NOTE - pointer = offset in the documnetation. 
 
 proc delay 
@@ -466,20 +488,58 @@ proc delay2
 endp delay2
 
 proc divWithRound
+  ; Function that does division with round for signed values. 
   push bp 
   mov bp, sp 
   push ax 
   push bx 
   push cx 
   push dx 
-  push si  
+  push si 
+  push di 
+  mov di, 0 ; di will determine if the final result should be negative or positive.
 
   mov si, [bp+4] ; the offset of 'result' variable in the DATASEG
   
   mov ax, [bp+8] ; dividend value 
   mov bx, [bp+6] ; divisor value 
-  div bx ; ax = int(ax / bx), dx = (ax % bx)
+
+  ; check if both ax and bx positive
+  cmp ax, 0 
+  jl checkBxNegative ; ax negative 
+  jmp checkOnlyBxNegative
+checkBxNegative:
+  cmp bx, 0 
+  jg diFlagOn ; bx positive
+  jmp diFlagOff
+checkOnlyBxNegative:
+  cmp bx, 0
+  jge diFlagOff
+
+diFlagOn:
+  mov di, 1
+diFlagOff:
   
+; calc absolute values of ax and bx:
+  push bx
+  xor bx, bx
+  mov bx, ax 
+  sar bx, 15 ; 16 - 1 = 15 bits, shift the sign bit of BX into all the bits
+	xor ax, bx ; toggle all the bits of AX if it's negative
+	sub ax, bx ; add the sign bit back if it was toggled 
+  pop bx 
+  
+  push ax
+  xor ax, ax 
+  mov ax, bx 
+  sar ax, 15 ; 16 - 1 = 15 bits, shift the sign bit of AX into all the bits
+	xor bx, ax ; toggle all the bits of BX if it's negative
+	sub bx, ax ; add the sign bit back if it was toggled 
+  pop ax 
+  
+  xor dx, dx ; clear the previous values in dx 
+  div bx  
+
   push dx ; save the value of dx 
   mov cx, bx
   mov dx, cx 
@@ -500,9 +560,16 @@ evenDivisor:
   inc ax
 
 skipRoundResult:
+  cmp di, 1 
+  jne skipNegateResult
 
+; negate ax
+  neg ax
+
+skipNegateResult:
   mov [si], ax 
 
+  pop di 
   pop si 
   pop dx 
   pop cx 
@@ -1665,7 +1732,7 @@ proc addTriangle
 	push si 
 	push di 
 	
-	mov bx, [bp+26] ; the offset of 'trianglesAmount' variable in the DATASEG
+	mov bx, [bp+24] ; the offset of 'trianglesAmount' variable in the DATASEG
 	mov cx, [bx]    ; move the value of trianglesAmount into cx, instead of the offset
 	shl cx, 3 		  ; calculate the highset of the next point values 
 	mov di, [bp+22] ; the offset of 'trianglesXCoordinates' array in the DATASEG
@@ -1674,7 +1741,7 @@ proc addTriangle
 	add si, cx 		  ; calculate y co-ordinates highset
 	shr cx, 3 		  ; return cx to its original value 
 	inc cx 
-	mov bx, [bp+26] ; the offset of 'trianglesAmount' variable in the DATASEG
+	mov bx, [bp+24] ; the offset of 'trianglesAmount' variable in the DATASEG
 	mov [bx], cx    ; update the amount of triangles 
 	
 	;mov cx, 3 ; cx = the amount of points the triangle have 
@@ -1716,7 +1783,7 @@ proc addTriangle
 	mov [di], bx
 	mov [si], bx
 
-	mov bx, [bp+24] ; the offset of 'trianglesColors' array in the DATASEG
+	mov bx, [bp+18] ; the offset of 'trianglesColors' array in the DATASEG
 	dec cx 
 	add bx, cx
 	mov ax, [bp+4] ; the value of the color for the triangle 
@@ -1729,7 +1796,7 @@ proc addTriangle
 	pop bx
 	pop ax
 	pop bp
-	ret 24
+	ret 22
 endp addTriangle 
 
 proc rotateAllTriangles
@@ -1796,7 +1863,6 @@ skipRotateAllTrianglesLoop:
 	ret 14
 endp rotateAllTriangles
 
-; TODO 
 proc addTriangleViaInput
 	push bp 
 	mov bp, sp 
@@ -1806,10 +1872,107 @@ proc addTriangleViaInput
 	push dx 
 	push si 
 	push di 	
+	push es 
 
 	xor ax, ax 
-	;mov 
+	xor bx, bx 
+	xor cx, cx
+	xor dx, dx
+	
+	mov si, [bp+18] ; the offset of 'pointsXCoordinatesInputedBuffer' array in the DATASEG
+	mov di, [bp+16] ; the offset of 'pointsYCoordinatesInputedBuffer' array in the DATASEG 
+	mov bx, [bp+14] ; the offset of 'pointsInputedAmount' variable in the DATASEG
+	; add current offset 
+	mov ax, [bx]
+	shl ax, 1 
+	add si, ax 
+	add di, ax 
 
+	; set the clock offset to es
+	mov ax, 40h
+	mov es, ax 
+	mov cx, 16 ; ticks amount to wait, ~0.88 seconds
+	
+	mov ax, [CLOCK]
+
+firstTick:
+	cmp ax, [CLOCK]
+	je firstTick 
+
+trianglePointsInputLoop:
+	push cx 
+	mov ax, [CLOCK]
+Tick:
+	cmp ax, [CLOCK]
+	je Tick 
+
+	xor ax, ax
+	; hide mouse cursor
+	mov ax, 2h
+	int 33h 
+	xor bx, bx
+	xor cx, cx 
+	xor dx, dx 
+	mov ax, 3h 
+	int 33h 
+	cmp bx, 01h 
+	jne skipAddPointToInputed
+	mov bx, [bp+14]
+	mov ax, 3
+	; check if the user have inputed enough points 
+	cmp [bx],  ax
+	je skipAddPointToInputed
+
+	shr cx, 1   ; adjust cx value to the proper x co-ordinate 
+	mov [si], cx 
+	mov [di], dx 
+	add si, 2  ; update the pointer of x co-ordinates to point on the next x co-ordinates offset
+	add di, 2  ; update the pointer of y co-ordinates to point on the next y co-ordinates offset
+	mov bx, [bp+14] ; the offset of 'pointsInputedAmount' variable in the DATASEG
+
+	; update the amount of points inputed counter value
+	mov cx, [bx]
+	inc cx 
+	mov [bx], cx 
+
+skipAddPointToInputed:
+	; put mouse cursor back on screen 
+	mov ax, 1h
+	int 33h 
+
+	pop cx 
+loop trianglePointsInputLoop
+
+	mov bx, [bp+14]
+	mov ax, 3
+	cmp [bx], ax
+	jne skipCallAddTriangleFunction
+
+	push [bp+10] ; the offset of 'trianglesAmount' variable in the DATASEG
+	push [bp+8]  ; the offset of 'trianglesXCoordinates' array in the DATASEG
+	push [bp+6]  ; the offset of 'trianglesYCoordinates' array in the DATASEG
+	push [bp+4]  ; the offset of 'trianglesColors' array in the DATASEG
+	mov cx, 3
+	; return the originals offsets to si and di 
+	mov si, [bp+18] ; the offset of 'pointsXCoordinatesInputedBuffer' array in the DATASEG
+	mov di, [bp+16] ; the offset of 'pointsYCoordinatesInputedBuffer' array in the DATASEG
+coordinatesPushLoop:
+	push [si]
+	add si, 2
+	push [di]
+	add di, 2
+loop coordinatesPushLoop
+	push [bp+12] ; the value of 'currentColor' variable in the DATASEG
+	call addTriangle
+
+	xor ax, ax
+	mov [bx], ax  	; initialize the value of 'pointsInputedAmount' variable
+	
+	mov bx, [bp+20] ; the offset of 'isTPressed' variable in the DATASEG
+	mov [bx], ax    ; set 0 to the value of 'isTPressed' so it will determine that 't' has not been pressed
+
+skipCallAddTriangleFunction:
+	pop es 
 	pop di 
 	pop si 
 	pop dx 
@@ -1817,8 +1980,9 @@ proc addTriangleViaInput
 	pop bx 
 	pop ax
 	pop bp 
-	ret 
+	ret 18
 endp addTriangleViaInput
+
 
 
 start:
@@ -1840,33 +2004,31 @@ start:
 	mov ax, 1h ; put mouse 
 	int 33h 
 
-	push offset trianglesAmount        ; + 26
-	push offset trianglesColors	       ; + 24
-	push offset trianglesXCoordinates  ; + 22
-	push offset trianglesYCoordinates	 ; + 20
-	push offset trianglesColors        ; + 18
-	push 175	; x1										 ; + 16
-	push 100	; y1                     ; + 14
-	push 225	; x2										 ; + 12
-	push 125	; y2                     ; + 10
-	push 200	; x3										 ; + 8
-	push 175	; y3										 ; + 6
-	push 15	  ; color									 ; + 4
-	call addTriangle	
+	; push offset trianglesAmount        ; + 24
+	; push offset trianglesXCoordinates  ; + 22
+	; push offset trianglesYCoordinates	 ; + 20
+	; push offset trianglesColors        ; + 18
+	; push 175	; x1										 ; + 16
+	; push 100	; y1                     ; + 14
+	; push 225	; x2										 ; + 12
+	; push 125	; y2                     ; + 10
+	; push 200	; x3										 ; + 8
+	; push 175	; y3										 ; + 6
+	; push 15	  ; color									 ; + 4
+	; call addTriangle	
 	
-	push offset trianglesAmount        ; + 26
-	push offset trianglesColors	       ; + 24
-	push offset trianglesXCoordinates  ; + 22
-	push offset trianglesYCoordinates	 ; + 20
-	push offset trianglesColors        ; + 18
-	push 50   ; x1										 ; + 16
-	push 50   ; y1                     ; + 14
-	push 100  ; x2										 ; + 12
-	push 50   ; y2                     ; + 10
-	push 50  	; x3										 ; + 8
-	push 100	; y3										 ; + 6
-	push 13	  ; color									 ; + 4
-	call addTriangle
+	; push offset trianglesAmount        ; + 24
+	; push offset trianglesXCoordinates  ; + 22
+	; push offset trianglesYCoordinates	 ; + 20
+	; push offset trianglesColors        ; + 18
+	; push 50   ; x1										 ; + 16
+	; push 50   ; y1                     ; + 14
+	; push 100  ; x2										 ; + 12
+	; push 50   ; y2                     ; + 10
+	; push 50  	; x3										 ; + 8
+	; push 100	; y3										 ; + 6
+	; push 13	  ; color									 ; + 4
+	; call addTriangle
 
 spinLoop:
 
@@ -1879,13 +2041,18 @@ spinLoop:
 	push offset variables 						; + 4
 	call drawAllTriangles
 	
-	xor ax, ax
-	mov ah, 1h
-	int 21h 
-	mov ah, 0h
-	int 21h
-	cmp al, 27 
-	je prepreExit
+	push offset isTPressed                      ; + 20
+	push offset pointsXCoordinatesInputedBuffer ; + 18
+	push offset pointsYCoordinatesInputedBuffer ; + 16
+	push offset pointsInputedAmount             ; + 14
+	xor ax, ax 
+	mov al, [currentColor]
+	push ax 																		; + 12
+	push offset trianglesAmount                 ; + 10
+	push offset trianglesXCoordinates           ; + 8
+	push offset trianglesYCoordinates           ; + 6
+	push offset trianglesColors                 ; + 4
+	call addTriangleViaInput
 	
 	push [trianglesAmount]            ; + 16
 	push offset trianglesClearColors	; + 14
@@ -1896,32 +2063,17 @@ spinLoop:
 	push offset variables 						; + 4
 	call drawAllTriangles
 	
-	push offset sinesX10												; + 16
-	push offset rotationResult 									; + 14
-	push offset result                          ; + 12
-	push [trianglesAmount]											; + 10
-	push offset trianglesDegreeRotationValues   ; + 8
-	push offset trianglesXCoordinates						; + 6
-	push offset trianglesYCoordinates						; + 4
+	push offset sinesX10											; + 16
+	push offset rotationResult 								; + 14
+	push offset result                        ; + 12
+	push [trianglesAmount]									  ; + 10
+	push offset trianglesDegreeRotationValues ; + 8
+	push offset trianglesXCoordinates					; + 6
+	push offset trianglesYCoordinates					; + 4
 	call rotateAllTriangles
-
-	push [trianglesAmount]            ; + 16
-	push offset trianglesColors				; + 14
-	push GRAPHICAL_SCREEN_VALUE       ; + 12
-	push offset trianglesXCoordinates ; + 10
-	push offset trianglesYCoordinates ; + 8
-	push offset result    						; + 6
-	push offset variables 						; + 4
-	call drawAllTriangles
-	
 	jmp spinLoop
 
-	jmp MainLoop
-
-prepreExit: jmp preExit
-
 MainLoop:
-	
 	xor bx, bx
 	xor ax, ax
 	mov ax, 1h ; put mouse 
