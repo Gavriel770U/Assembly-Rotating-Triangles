@@ -3,8 +3,23 @@ MODEL SMALL
 STACK 100h 
 DATASEG 
 
-; --------------------------   general data    --------------------------
+; ---------------------    color pick buffer data    ---------------------
 
+  colorPickBuffer db 27, 27, 27, 27, 27, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 27, 27, 27, 27, 27, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10
+  db 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 27, 27, 27, 27, 27, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 27, 27, 27, 27, 27, 12, 12, 12, 12, 12, 12
+  db 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 27, 27, 27, 27, 27, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13
+  db 13, 13, 13, 13, 13, 13, 13, 27, 27, 27, 27, 27, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 27, 27, 27, 27, 27, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15
+  db 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 27, 27, 27, 27, 27
+  
+  isPickBufferOpen dw 0 ; 0 - false, 1 - true AKA is 'c' key pressed
+
+  currentColor db 42
+  
+  isPointOnColorPick dw 0 ; 0 - fasle, 1 - true
+
+; -----------------------------------------------------------------------
+
+; --------------------------   general data    --------------------------
 
 	direction dw ? ; 1 - up, 2 - right, 3 - down, 4 - left 
 	pointx	  dw ?
@@ -24,7 +39,7 @@ DATASEG
 	;                              invslope1   insvlope2
 	drawFilledVariables     dw 	    	0, 		      0  
 	
-	currentColor db 42 ; the current color that is selected
+	;currentColor db 42 ; the current color that is selected
 
 ; ----------------------------------------------------------------
 
@@ -50,7 +65,7 @@ DATASEG
 	trianglesYCoordinates dw 50, 50, 100, 999, 100, 125, 75, 999
 	dw 132 dup (0) ; format: y_1_1, y_1_2, y_1_3, 999, y_2_1 ...
 	
-	trianglesDegreeRotationValues dw 30, 30
+	trianglesDegreeRotationValues dw 15, 15
 	dw 11 dup (30)
 	
 	trianglesColors db 10, 12
@@ -435,9 +450,22 @@ GRAPHICAL_SCREEN_VALUE equ 0A000h
 SCREEN_WIDTH 		equ		320
 SCREEN_HEIGHT 	equ 	200  
 
-GREEN_PIXEL			equ 	10
-RED_PIXEL				equ 	4
-BLACK_PIXEL 		equ		0
+; COLOR PICK BUFFER CONSTANTS 
+COLOR_PICK_BUFFER_SIZE							equ 299
+COLOR_PICK_BUFFER_WIDTH 						equ SCREEN_WIDTH-21
+COLOR_PICK_BUFFER_HEIGHT 						equ 20
+COLOR_PICK_BUFFER_OFFSET_FROM_START equ 10
+COLOR_PICK_BUFFER_MARGIN_HEIGHT		 	equ 5
+
+BLACK_PIXEL 		equ 0
+BLUE_PIXEL 			equ 9
+GREEN_PIXEL 		equ 10
+CYAN_PIXEL 			equ 11
+RED_PIXEL 			equ 12 
+MAGENTA_PIXEL 	equ 13 
+YELLOW_PIXEL 		equ 14 
+WHITE_PIXEL 		equ 15 
+GREY_PIXEL 			equ 27
 
 DECREMENT				equ   1 
 INCREMENT				equ 	1
@@ -728,6 +756,181 @@ proc pointCoordinatesToPixelCoordinate
 	pop bp 
 	ret 6 
 endp pointCoordinatesToPixelCoordinate
+
+;=====================================================================================
+;==========================   COLOR PICK BUFFER FUNCTIONS   ==========================
+;=====================================================================================
+
+proc hideColorPicker 
+  push bp 
+  mov bp, sp
+  push ax
+  push bx 
+  push cx
+  push es 
+  
+  mov ax, 2h ; hide mouse cursor 
+	int 33h 
+  
+  mov es, [bp+4] ; the offset of graphic screen
+  mov bx, COLOR_PICK_BUFFER_OFFSET_FROM_START
+  mov al, BLACK_PIXEL
+  mov cx, COLOR_PICK_BUFFER_WIDTH
+
+outColorPickHideLoop:
+  push cx
+  push bx 
+  mov cx, COLOR_PICK_BUFFER_HEIGHT+(COLOR_PICK_BUFFER_MARGIN_HEIGHT)*2
+  inColorPickHideLoop:
+    mov [byte ptr es:bx], al
+    add bx, SCREEN_WIDTH
+  loop inColorPickHideLoop
+  pop bx 
+  pop cx 
+  inc bx
+loop outColorPickHideLoop   
+
+  mov ax, 1h ; show mouse cursor 
+	int 33h 
+
+  pop es 
+  pop cx 
+  pop bx 
+  pop ax
+  pop bp 
+  ret 2
+endp hideColorPicker 
+
+proc showColorPicker
+  push bp 
+  mov bp, sp 
+  push ax 
+  push bx
+  push cx
+  push si
+  push di
+  push es 
+
+  mov es, [bp+8] ; graphic screen offset 
+  mov si, [bp+6] ; the offset of 'colorPickBuffer' array in the DATASEG
+  mov di, [bp+4] ; the offset of 'isPickBufferOpen' variable in the DATASEG 
+  
+  mov ax, 2h ; hide mouse cursor 
+	int 33h 
+
+  mov ax, 1 
+  mov [di], ax 
+  xor ax, ax
+
+  mov bx, COLOR_PICK_BUFFER_OFFSET_FROM_START
+  mov cx, COLOR_PICK_BUFFER_MARGIN_HEIGHT
+  mov al, GREY_PIXEL
+
+outFillColorPickTopMarginLoop:
+  push cx 
+  mov cx, COLOR_PICK_BUFFER_WIDTH
+  inFillColorPickTopMarginLoop:
+    mov [byte ptr es:bx], al
+    inc bx 
+  loop inFillColorPickTopMarginLoop
+  pop cx 
+  ; bx will point to the next line:
+  sub bx, COLOR_PICK_BUFFER_WIDTH
+  add bx, SCREEN_WIDTH
+loop outFillColorPickTopMarginLoop 
+
+  mov cx, COLOR_PICK_BUFFER_WIDTH
+
+outColorPickFillLoop:
+  push cx
+  push bx 
+  mov cx, COLOR_PICK_BUFFER_HEIGHT
+  inColorPickFillLoop:
+    mov [byte ptr es:bx], al
+    add bx, SCREEN_WIDTH
+  loop inColorPickFillLoop
+  pop bx 
+  pop cx 
+  inc si
+  inc bx
+  mov al, [byte ptr si] 
+loop outColorPickFillLoop   
+
+  mov cx, COLOR_PICK_BUFFER_MARGIN_HEIGHT
+  mov al, GREY_PIXEL
+  mov bx, (SCREEN_WIDTH * (COLOR_PICK_BUFFER_HEIGHT + COLOR_PICK_BUFFER_MARGIN_HEIGHT) + COLOR_PICK_BUFFER_OFFSET_FROM_START)
+outFillColorPickBottomMarginLoop:
+  push cx 
+  mov cx, COLOR_PICK_BUFFER_WIDTH
+inFillColorPickBottomMarginLoop:
+    mov [byte ptr es:bx], al
+    inc bx 
+  loop inFillColorPickBottomMarginLoop
+  pop cx 
+  ; bx will point to the next line:
+  sub bx, COLOR_PICK_BUFFER_WIDTH
+  add bx, SCREEN_WIDTH
+loop outFillColorPickBottomMarginLoop  
+
+  mov ax, 1h ; show mouse cursor 
+	int 33h 
+  
+  pop es 
+  pop di
+  pop si 
+  pop cx 
+  pop bx 
+  pop ax
+  pop bp 
+  ret 6
+endp showColorPicker
+
+proc checkIfPointOnColorPicker
+  push bp 
+  mov bp, sp 
+  push ax 
+  push bx 
+  push cx 
+  push si   
+
+  mov si, [bp+8] ; the offset of 'isPointOnColorPick' variable in the DATASEG
+  mov ax, [bp+6] ; x coordinate value of the point to check  
+  mov bx, [bp+4] ; y coordinate value of the point to check
+  
+  cmp ax, COLOR_PICK_BUFFER_OFFSET_FROM_START
+  jae checkXLessThanBufferWidth
+  jmp notOnColorPicker
+
+checkXLessThanBufferWidth:
+  cmp ax, COLOR_PICK_BUFFER_WIDTH 
+  jb checkYLessThanBufferHeight
+  jmp notOnColorPicker 
+
+checkYLessThanBufferHeight:
+  cmp bx, COLOR_PICK_BUFFER_HEIGHT+(COLOR_PICK_BUFFER_MARGIN_HEIGHT)*2 
+  jb onColorPicker 
+  jmp notOnColorPicker
+
+onColorPicker:
+  mov ax, 1
+  jmp endCheckIfPointOnColorPicker
+
+notOnColorPicker:
+  xor ax, ax 
+
+endCheckIfPointOnColorPicker:
+  mov [si], ax 
+
+  pop si 
+  pop cx 
+  pop bx 
+  pop ax
+  pop bp 
+  ret 6
+endp checkIfPointOnColorPicker 
+
+;=====================================================================================
+;=====================================================================================
 
 proc drawLine
 ; this procedure gets 2 (x,y) coordinates as input and draws a line between them 
@@ -1983,7 +2186,229 @@ skipCallAddTriangleFunction:
 	ret 18
 endp addTriangleViaInput
 
+proc changeCurrentColorViaColorPickBuffer
+	push bp 
+	mov bp, sp 
+	push ax 
+	push bx
+	push cx 
+	push dx 
+	push si 
+	push di 
+	push es 
+	
+	; set the clock offset to es
+	mov ax, 40h
+	mov es, ax 
+	mov cx, 16 ; ticks amount to wait for mouse input, ~0.88 seconds
+	
+	mov si, [bp+12] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	mov si, [si]
+	cmp si, 0
+	je hideColorPickBufferLabel
+	push GRAPHICAL_SCREEN_VALUE
+	push [bp+10] ; the offset 'colorPickBuffer' array in the DATASEG
+	push [bp+12] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	call showColorPicker
+	jmp skipHideColorPickBufferLabel
 
+hideColorPickBufferLabel:
+	push GRAPHICAL_SCREEN_VALUE
+	call hideColorPicker
+	mov bx, [bp+12] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	xor dx, dx 
+	mov [bx], dx
+	jmp endHiding
+
+skipHideColorPickBufferLabel:
+	mov ax, [CLOCK]
+firstTickSkip:
+	cmp ax, [CLOCK]
+	je firstTickSkip
+
+mouseInputLoop:
+	mov ax, 1h ; show mouse cursor 
+	int 33h 
+
+	mov dx, [CLOCK]
+TickToWait:
+	cmp dx, [CLOCK]
+	je TickToWait
+	
+	push cx ; save the value of cx 
+	xor bx, bx
+	xor cx, cx 
+	xor dx, dx 
+	mov ax, 3h 
+	int 33h 
+	shr cx, 1   ; adjust the value of cx to the values on the graphic screen 
+	cmp bx, 01h ; check if left button of the mouse has been pressed
+	jne noMouseInput
+
+	mov ax, 2h ; hide mouse cursor 
+	int 33h 
+  
+	mov bx, [bp+12] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	mov bx, [bx]
+	cmp bx, 1 
+	jne noMouseInput 
+
+  mov di, [bp+8] ; the offset of 'isPointOnColorPick' variable in the DATASEG
+	push di
+	push cx 
+	push dx 
+	call checkIfPointOnColorPicker
+	mov di, [di]
+	cmp di, 1
+	jne noMouseInput
+
+	; set new color
+	mov di, [bp+6] ; the offset of 'result' variable in the DATASEG 
+	push di 
+	push cx 
+	push dx 
+	call pointCoordinatesToPixelCoordinate 
+	mov di, [di]
+
+	push es 
+	mov ax, GRAPHICAL_SCREEN_VALUE
+	mov es, ax 
+	mov al, [byte ptr es:di]
+	pop es 
+
+	cmp al, GREY_PIXEL
+	je noMouseInput
+	
+	mov bx, [bp+4] ; the offset of 'currentColor' variable in the DATASEG
+	mov [byte ptr bx], al 
+noMouseInput:
+	pop cx
+loop mouseInputLoop
+
+endHiding:
+
+	pop es 
+	pop di 
+	pop si 
+	pop dx 
+	pop cx
+	pop bx
+	pop ax 
+	pop bp 
+	ret 10
+endp changeCurrentColorViaColorPickBuffer
+
+proc inputManager
+	push bp 
+	mov bp, sp 
+	push ax 
+	push bx 
+	push cx 
+	push dx 
+	push si 
+	push di 
+	push es
+	
+	; set the clock offset to es
+	mov ax, 40h
+	mov es, ax 
+	mov cx, 9 ; ticks amount to wait for keyboard input, ~0.5 seconds
+	
+	mov dx, [CLOCK]
+firstTickWait:
+	cmp dx, [CLOCK]
+	je firstTickWait
+	
+keyboardInputManagerLoop:
+	mov dx, [CLOCK]
+TickWait:
+	cmp dx, [CLOCK]
+	je TickWait
+
+	xor al, al
+	mov ah, 1h 
+	int 16h
+	jz prenoData 
+	mov ah, 0h
+	int 16h
+	
+	cmp al, 27
+	je escPressHandler
+	cmp al, 'c'
+	je cPressHandler
+	cmp al, 't'
+	je tPressHandler
+	jmp noData
+
+escPressHandler:
+	mov bx, [bp+28] ; the offset of 'result' variable in the DATASEG
+	mov dx, 1
+	mov [bx], dx
+	jmp exitInputManager
+
+cPressHandler:
+	; check if other keys had been already pressed 
+	mov bx, [bp+26] ; the offset of 'isTPressed' vairable in the DATASEG
+	mov bx, [bx]
+	cmp bx, 1 
+	je runTriangleInput 
+	
+	mov bx, [bp+24] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	mov dx, [bx]
+	; update the value of 'isPickBufferOpen' variable 
+	inc dx 
+	and dx, 1
+	mov [bx], dx
+	mov dx, 1 
+	cmp [bx], dx  
+	jmp runColorPicker 
+
+tPressHandler:
+	; check if other keys had been already pressed 
+	mov bx, [bp+24] ; the offset of 'isPickBufferOpen' variable in the DATASEG
+	mov dx, [bx]
+	cmp dx, 1
+	je noData
+	;FIXME
+	jmp runTriangleInput 
+prenoData: jmp noData
+prekeyboardInputManagerLoop: jmp keyboardInputManagerLoop
+runColorPicker:
+	push [bp+24] ; offset isPickBufferOpen
+	push [bp+22] ; offset colorPickBuffer
+	push [bp+20] ; offset isPointOnColorPick
+	push [bp+28] ; offset result
+	push [bp+18] ; offset currentColor
+	call changeCurrentColorViaColorPickBuffer
+	jmp noData
+runTriangleInput:
+	push [bp+26] ; offset isTPressed
+	push [bp+16] ; offset pointsXCoordinatesInputedBuffer
+	push [bp+14] ; offset pointsYCoordinatesInputedBuffer
+	push [bp+12] ; offset pointsInputedAmount
+	xor ah, ah 
+	mov bx, [bp+18] 
+	mov al, [byte ptr bx] 
+	push ax ; current color
+	push [bp+10] ; offset trianglesAmount
+	push [bp+8] ; offset trianglesXCoordinates
+	push [bp+6] ; offset trianglesYCoordinates
+	push [bp+4] ; offset trianglesColors
+	call addTriangleViaInput
+noData:
+loop prekeyboardInputManagerLoop
+
+exitInputManager:
+	pop es 
+	pop di 
+	pop si 
+	pop dx 
+	pop cx 
+	pop bx 
+	pop ax
+	pop bp 
+	ret 26
+endp inputManager
 
 start:
 	mov ax, @data
@@ -2029,9 +2454,29 @@ start:
 	; push 100	; y3										 ; + 6
 	; push 13	  ; color									 ; + 4
 	; call addTriangle
+	
+	; push offset isTPressed                      ; + 20
+	; push offset pointsXCoordinatesInputedBuffer ; + 18
+	; push offset pointsYCoordinatesInputedBuffer ; + 16
+	; push offset pointsInputedAmount             ; + 14
+	; xor ax, ax 
+	; mov al, [currentColor]
+	; push ax 																		; + 12
+	; push offset trianglesAmount                 ; + 10
+	; push offset trianglesXCoordinates           ; + 8
+	; push offset trianglesYCoordinates           ; + 6
+	; push offset trianglesColors                 ; + 4
+	; call addTriangleViaInput
+	
+	
+	; push offset isPickBufferOpen		; + 12
+	; push offset colorPickBuffer			; + 10
+	; push offset isPointOnColorPick	; + 8
+	; push offset result							; + 6
+	; push offset currentColor				; + 4
+	; call changeCurrentColorViaColorPickBuffer
 
 spinLoop:
-
 	push [trianglesAmount]            ; + 16
 	push offset trianglesColors				; + 14
 	push GRAPHICAL_SCREEN_VALUE       ; + 12
@@ -2039,21 +2484,37 @@ spinLoop:
 	push offset trianglesYCoordinates ; + 8
 	push offset result    						; + 6
 	push offset variables 						; + 4
-	call drawAllTriangles
+	call drawAllTriangles	
+
+	mov bx, [isPickBufferOpen]
+	cmp bx, 1 
+	jne skipBufferSavePaint2
+	push GRAPHICAL_SCREEN_VALUE
+	push offset colorPickBuffer
+	push offset isPickBufferOpen
+	call showColorPicker
+skipBufferSavePaint2:
 	
-	push offset isTPressed                      ; + 20
-	push offset pointsXCoordinatesInputedBuffer ; + 18
-	push offset pointsYCoordinatesInputedBuffer ; + 16
-	push offset pointsInputedAmount             ; + 14
-	xor ax, ax 
-	mov al, [currentColor]
-	push ax 																		; + 12
-	push offset trianglesAmount                 ; + 10
-	push offset trianglesXCoordinates           ; + 8
-	push offset trianglesYCoordinates           ; + 6
-	push offset trianglesColors                 ; + 4
-	call addTriangleViaInput
+	push offset result															; + 28
+	push offset isTPressed													; + 26
+	push offset isPickBufferOpen										; + 24
+	push offset colorPickBuffer											; + 22
+	push offset isPointOnColorPick									; + 20
+	push offset currentColor												; + 18
+	push offset pointsXCoordinatesInputedBuffer			; + 16
+	push offset pointsYCoordinatesInputedBuffer			; + 14
+	push offset pointsInputedAmount									; + 12
+	push offset trianglesAmount											; + 10
+	push offset trianglesXCoordinates								; + 8
+	push offset trianglesYCoordinates								; + 6
+	push offset trianglesColors											; + 4
+	call inputManager
 	
+	mov di, [result]
+	cmp di, 1
+	jne skipExitJump
+	jmp exitSpinLoop	
+	skipExitJump:
 	push [trianglesAmount]            ; + 16
 	push offset trianglesClearColors	; + 14
 	push GRAPHICAL_SCREEN_VALUE       ; + 12
@@ -2062,7 +2523,15 @@ spinLoop:
 	push offset result    						; + 6
 	push offset variables 						; + 4
 	call drawAllTriangles
-	
+
+	mov bx, [isPickBufferOpen]
+	cmp bx, 1 
+	jne skipBufferSavePaint
+	push GRAPHICAL_SCREEN_VALUE
+	push offset colorPickBuffer
+	push offset isPickBufferOpen
+	call showColorPicker
+skipBufferSavePaint:
 	push offset sinesX10											; + 16
 	push offset rotationResult 								; + 14
 	push offset result                        ; + 12
@@ -2072,6 +2541,8 @@ spinLoop:
 	push offset trianglesYCoordinates					; + 4
 	call rotateAllTriangles
 	jmp spinLoop
+
+exitSpinLoop: call far cs:exit
 
 MainLoop:
 	xor bx, bx
@@ -2210,9 +2681,7 @@ exit:
 END start
 
 ; TODO
-
 ; 	**IMP. !!! ADD DOCUMENTATION FOR ALL FUNCTIONS !!! 
-;	    2. add start screen to the code.
-;		7i. function that does a delay by given as parameter amount of time.
-;     s. create cool and relaxing music and add it - MUSIC CREATED, 
-; Imp1. Create and add MULTITHREADING 
+;	    1. add start screen to the code.
+;     2. add music
+;			3. add save buffer to hide color pick buffer 
